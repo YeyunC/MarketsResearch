@@ -19,8 +19,8 @@ app.layout = dbc.Container([
     # dbc.Row([dbc.Col(html.Div("Python Multipage App with Dash", style={'fontSize': 50, 'textAlign': 'center'}))]),
     html.Hr(),
     dbc.Row([
-        dbc.Col([sidebar], xs=2, sm=2, md=1, lg=1, xl=1, xxl=1),
-        dbc.Col([dash.page_container], xs=10, sm=10, md=11, lg=11, xl=11, xxl=11)
+        dbc.Col([sidebar], xs=4, sm=4, md=2, lg=2, xl=2, xxl=2),
+        dbc.Col([dash.page_container], xs=8, sm=8, md=10, lg=10, xl=10, xxl=10)
     ])
 ], fluid=True)
 

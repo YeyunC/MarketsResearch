@@ -8,6 +8,7 @@ import requests
 class cryptoCompareApi():
     def __init__(self):
         self.api_key = "bd7e829531032b62e5042190f9508096366df339e576b8469469ea1f4ddcd6d9"
+        self.meta_data_futures = {}
 
     def request_to_df(self, url, params={}):
         response = requests.get(url, params=params)
@@ -17,6 +18,7 @@ class cryptoCompareApi():
             data_df = pd.DataFrame(data)
             return data_df
         else:
+            print(response.json()['Err']['message'])
             return pd.DataFrame()
 
     def request_to_dict(self, url, params={}):
@@ -26,6 +28,7 @@ class cryptoCompareApi():
             data = response.json()["Data"]
             return data
         else:
+            print(response.json()['Err']['message'])
             return {}
 
     def calc_n_period(self, start_date, end_date, freq):
@@ -83,17 +86,20 @@ class cryptoCompareApi():
         data.index = [dt.datetime.fromtimestamp(x) for x in data['TIMESTAMP']]
         return data[['MARKET', 'INSTRUMENT', 'MAPPED_INSTRUMENT', 'CLOSE']]
 
-    def load_all_futures_markets_instruments(self):
+    def load_all_futures_meta_data(self):
         url = 'https://data-api.cryptocompare.com/futures/v1/markets/instruments'
         data = self.request_to_dict(url, {})
         return data
 
-    def instrument_search(self, token):
-        meta_data = self.load_all_futures_markets_instruments()
-        for market, market_meta in meta_data.items():
+    def load_all_futures_markets_instruments(self):
+        if len(self.meta_data_futures) == 0:
+            self.meta_data_futures = self.load_all_futures_meta_data()
+
+        market_instru_list = []
+        for market, market_meta in self.meta_data_futures.items():
             for instru, instru_meta in market_meta['instruments'].items():
-                if token.lower() in str(instru).lower():
-                    print(f'{market} {instru}')
+                market_instru_list.append((market, instru))
+        return market_instru_list
 
 
 if __name__ == '__main__':
