@@ -1,19 +1,15 @@
 import datetime as dt
 
 import dash
-import plotly.express as px
 import plotly.graph_objects as go
-from dash import dcc
-from dash import html
-from dash.dependencies import Input, Output
+from dash import dcc, html, callback, Output, Input
 from dash.exceptions import PreventUpdate
 
 from DataAPI.cryptoCompare import cryptoCompareApi
 
-app = dash.Dash()  # initialising dash app
-df = px.data.stocks()  # reading stock price dataset
-
 __app_id = 'funding_rate_'
+dash.register_page(__name__, path='/', name=__app_id.replace('_', ' ').title())
+
 __dataAPI = cryptoCompareApi()
 
 
@@ -31,6 +27,9 @@ def get_layout():
         dcc.Graph(
             id=__app_id + 'funding_rate_chart')])
     return layout
+
+
+layout = get_layout()
 
 
 def load_future_data(market, instrument):
@@ -51,17 +50,14 @@ def plot_funding_rates(market, instrument):
     df = load_future_data(market, instrument)
     fig = go.Figure([go.Scatter(x=df.index, y=df['CLOSE'], line=dict(color='firebrick', width=4), name='XBTUSD')])
     fig.update_layout(
-        title='Fundung Rate over time',
+        title=f'{market} {instrument} Fundung Rate over time',
         xaxis_title='Dates',
-        yaxis_title='Prices'
+        yaxis_title='Funding Rate'
     )
     return fig
 
 
-app.layout = get_layout()
-
-
-@app.callback(
+@callback(
     Output(component_id=__app_id + 'funding_rate_chart', component_property='figure'),
     [Input(component_id=__app_id + 'mkt_instru_dropdown', component_property='value')])
 def graph_update(dropdown_value):
@@ -71,7 +67,3 @@ def graph_update(dropdown_value):
     market, instrument = dropdown_value
     fig = plot_funding_rates(market, instrument)
     return fig
-
-
-if __name__ == '__main__':
-    app.run_server()
