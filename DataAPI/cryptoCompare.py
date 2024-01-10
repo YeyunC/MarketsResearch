@@ -9,6 +9,7 @@ class cryptoCompareApi():
     def __init__(self):
         self.api_key = "bd7e829531032b62e5042190f9508096366df339e576b8469469ea1f4ddcd6d9"
         self.meta_data_futures = {}
+        self.meta_data_spots = {}
 
     def request_to_df(self, url, params={}):
         response = requests.get(url, params=params)
@@ -86,18 +87,33 @@ class cryptoCompareApi():
         data.index = [dt.datetime.fromtimestamp(x) for x in data['TIMESTAMP']]
         return data[['MARKET', 'INSTRUMENT', 'MAPPED_INSTRUMENT', 'CLOSE']]
 
-    def load_all_futures_meta_data(self):
-        url = 'https://data-api.cryptocompare.com/futures/v1/markets/instruments'
+    def load_all_meta_data(self, mode='spot'):
+        if not mode in ['futures', 'spot', 'index']:
+            return
+
+        url = f'https://data-api.cryptocompare.com/{mode}/v1/markets/instruments'
         data = self.request_to_dict(url, {})
         return data
 
     def load_all_futures_markets_instruments(self):
         if len(self.meta_data_futures) == 0:
-            self.meta_data_futures = self.load_all_futures_meta_data()
+            self.meta_data_futures = self.load_all_meta_data(mode='futures')
 
         market_instru_list = []
         for market, market_meta in self.meta_data_futures.items():
             for instru, instru_meta in market_meta['instruments'].items():
+                # mapped_instru = instru_meta['INSTRUMENT_MAPPING']['MAPPED_INSTRUMENT']
+                market_instru_list.append((market, instru))
+        return market_instru_list
+
+    def load_all_spots_markets_instruments(self):
+        if len(self.meta_data_spots) == 0:
+            self.meta_data_spots = self.load_all_meta_data(mode='spot')
+
+        market_instru_list = []
+        for market, market_meta in self.meta_data_spots.items():
+            for instru, instru_meta in market_meta['instruments'].items():
+                # mapped_instru = instru_meta['INSTRUMENT_MAPPING']['MAPPED_INSTRUMENT']
                 market_instru_list.append((market, instru))
         return market_instru_list
 
@@ -114,8 +130,6 @@ if __name__ == '__main__':
     #     instrument='XBTUSD')
     # data = dataAPI.proc_funding_rate_historical_ohlcv(data)
 
-    data = dataAPI.load_all_futures_markets_instruments()
-    dataAPI.instrument_search('btc')
 
-    # data = dataAPI.load_all_futures_instruments(market='binance')
+    data = dataAPI.load_all_spots_markets_instruments()
     print(data)
