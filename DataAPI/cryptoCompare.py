@@ -96,11 +96,14 @@ class cryptoCompareApi():
 
     def proc_historical_ohlcv(self, data):
         data['TIMESTAMP'] = [dt.datetime.fromtimestamp(x) for x in data['TIMESTAMP']]
-        return data[[
+        desired_column = [
             'TIMESTAMP', 'CLOSE', 'TOTAL_TRADES', 'VOLUME',
             'TOTAL_TRADES_BUY', 'TOTAL_TRADES_SELL',
             'VOLUME_BUY', 'VOLUME_SELL'
-        ]]
+        ]
+
+        columns = pd.Series(list(set(desired_column).intersection(set(data.columns))))
+        return data[columns]
 
     def load_all_meta_data(self, mode='spot'):
         if not mode in ['futures', 'spot', 'index']:
