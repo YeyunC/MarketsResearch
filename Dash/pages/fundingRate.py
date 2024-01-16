@@ -102,10 +102,12 @@ def plot_prices(spot_instru, future_instru, funding_instru):
     df = pd.concat([df_spot, df_funding], axis=1)
 
     future_list = __dataAPI.load_futures_instruments(underlying='BTC-USDT', style='VANILLA')
-    for tmp_futures in future_list:
+    for tmp_idx, tmp in future_list.iterrows():
         # future_v, future_i = tmp_futures.split('|')
-        df_future = __dataAPI.load_annual_hourly_ohlc_data(mode='futures', instrument=tmp_futures, market='binance')
-        df_future = df_future[['TIMESTAMP', 'CLOSE']].rename({'CLOSE': tmp_futures}, axis=1)
+        df_future = __dataAPI.load_annual_hourly_ohlc_data(mode='futures', instrument=tmp['instrument'],
+                                                           market=tmp['market'])
+        tmp_name = f"{tmp['market']}|{tmp['instrument']}"
+        df_future = df_future[['TIMESTAMP', 'CLOSE']].rename({'CLOSE': tmp_name}, axis=1)
         df_future = df_future.drop_duplicates(subset='TIMESTAMP', keep='last').set_index('TIMESTAMP')
         df = pd.concat([df, df_future], axis=1)
 

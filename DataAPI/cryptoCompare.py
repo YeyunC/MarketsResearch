@@ -95,6 +95,8 @@ class cryptoCompareApi():
         return data
 
     def proc_historical_ohlcv(self, data):
+        if len(data) == 0:
+            return pd.DataFrame()
         data['TIMESTAMP'] = [dt.datetime.fromtimestamp(x) for x in data['TIMESTAMP']]
         desired_column = [
             'TIMESTAMP', 'CLOSE', 'TOTAL_TRADES', 'VOLUME',
@@ -194,12 +196,19 @@ class cryptoCompareApi():
                 market=market,
                 instrument=instrument)
             data = self.proc_historical_ohlcv(data)
-            data.to_csv(file_path, index_label=False)
+            if len(data) == 0:
+                pd.DataFrame({'EMPTY':[]}).to_csv(file_path, index_label=False)
+            else:
+                data.to_csv(file_path, index_label=False)
 
         data = pd.read_csv(file_path)
-        data['TIMESTAMP'] = pd.to_datetime(data['TIMESTAMP'])
         print(f'{path_to_cache} loaded {len(data)} rows')
-        return data
+        if len(data) > 0:
+            data['TIMESTAMP'] = pd.to_datetime(data['TIMESTAMP'])
+            return data
+        else:
+            return pd.DataFrame()
+
 
 
 if __name__ == '__main__':
