@@ -1,3 +1,5 @@
+import datetime as dt
+
 import dash
 import dash_bootstrap_components as dbc
 import pandas as pd
@@ -99,7 +101,7 @@ def plot_prices(spot_instru, future_instru, funding_instru):
     df_funding = df_funding[['TIMESTAMP', 'CLOSE']].rename({'CLOSE': 'funding'}, axis=1).set_index('TIMESTAMP')
     df = pd.concat([df_spot, df_funding], axis=1)
 
-    future_list = __dataAPI.load_futures_instruments(market='binance', underlying='BTC-USDT')
+    future_list = __dataAPI.load_futures_instruments(underlying='BTC-USDT', style='VANILLA')
     for tmp_futures in future_list:
         # future_v, future_i = tmp_futures.split('|')
         df_future = __dataAPI.load_annual_hourly_ohlc_data(mode='futures', instrument=tmp_futures, market='binance')
@@ -109,20 +111,34 @@ def plot_prices(spot_instru, future_instru, funding_instru):
 
     df = df.sort_index().reset_index()
 
+    # annualized the basis
+    df['annual_funding'] = df['funding'] * 3 * 365
     for tmp_futures in future_list:
         df[tmp_futures] = df[tmp_futures] / df['spot'] - 1
-
-    df['annual_funding'] = df['funding'] * 3 * 365
+        tenor = tmp_futures.split('-')[-1]
+        if tenor == 'PERPETUAL':
+            df[tmp_futures] = df[tmp_futures] * 3 * 365
+        else:
+            expiry = dt.datetime.strptime(tenor, '%Y%m%d')
+            today = dt.datetime.now()
+            annulized_factor = (expiry - today).days / 365
+            df[tmp_futures] = df[tmp_futures] / annulized_factor
 
     quantiles = df.quantile([0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99])
     quantiles['stats'] = [f'{x:0.0%} percentile' for x in quantiles.index]
     stats = pd.DataFrame([df.mean(), df.std()], index=['mean', 'std dev'])
     stats['stats'] = stats.index
     quantiles = pd.concat([stats, quantiles])
-    quantiles['annual_funding'] = [f'{x:.2%}' for x in quantiles['annual_funding']]
 
+    quantiles['annual_funding'] = [f'{x:.2%}' for x in quantiles['annual_funding']]
     for tmp_futures in future_list:
-        quantiles[tmp_futures] = [f'{x * 1e4:.2f}' for x in quantiles[tmp_futures]]
+        quantiles[tmp_futures] = [f'{x:.2%}' for x in quantiles[tmp_futures]]
+
+    stats = pd.DataFrame([df.count()], index=['n_datapoints'])
+    for tmp_futures in future_list:
+        stats[tmp_futures] = [f'{x:,.0f}' for x in stats[tmp_futures]]
+    stats['stats'] = stats.index
+    quantiles = pd.concat([stats, quantiles])
 
     quantiles = quantiles[['stats', 'annual_funding'] + future_list]
     quantile_table = dash_table.DataTable(quantiles.to_dict('records'),
@@ -130,17 +146,16 @@ def plot_prices(spot_instru, future_instru, funding_instru):
 
     fig_price = go.Figure([
         go.Scatter(x=df['TIMESTAMP'], y=df['spot'], name=spot_instru)])
-
     fig_price.update_layout(
         title=f'Spot vs Futures/Perp over time',
         xaxis_title='Dates',
         yaxis_title='Price in $'
     )
+
     fig_funding = go.Figure([
-                                go.Scatter(x=df['TIMESTAMP'], y=df['funding'] * 1e4, name='funding rates')] + [
-                                go.Scatter(x=df['TIMESTAMP'], y=df[tmp_futures] * 1e4, name=f'basis for {tmp_futures}')
-                                for tmp_futures in future_list
-                            ])
+                                go.Scatter(x=df['TIMESTAMP'], y=df['annual_funding'], name='funding rates')] + [
+                                go.Scatter(x=df['TIMESTAMP'], y=df[tmp_futures], name=f'basis for {tmp_futures}')
+                                for tmp_futures in future_list])
 
     fig_funding.update_layout(
         title=f'Fundung Rate vs Future-Spot over time',
@@ -149,8 +164,9 @@ def plot_prices(spot_instru, future_instru, funding_instru):
     )
 
     fig_histogram = go.Figure()
-    # fig_histogram.add_trace(go.Histogram(x=df['basis'] * 1e4, name='funding rates'))
-    fig_histogram.add_trace(go.Histogram(x=df['annual_funding'], name='funding'))
+    fig_histogram.add_trace(go.Histogram(x=df['annual_funding'], name='annual_funding', histnorm='probability density'))
+    for tmp_futures in future_list:
+        fig_histogram.add_trace(go.Histogram(x=df[tmp_futures], name=tmp_futures, histnorm='probability density'))
     fig_histogram.update_layout(barmode='overlay')
     # Reduce opacity to see both histograms
     fig_histogram.update_traces(opacity=0.75)

@@ -135,6 +135,45 @@ class cryptoCompareApi():
                 market_instru_list.append((market, instru))
         return market_instru_list
 
+    def load_all_futures_markets_instrument_df(self):
+        all_futures = self.load_all_futures_markets_instruments()
+        df = pd.DataFrame(all_futures, columns=['market', 'instrument'])
+        df['underlying'] = ['-'.join(x.split('-')[:2]) for x in df['instrument']]
+        df['style'] = [x.split('-')[-2] for x in df['instrument']]
+        df['tenor'] = [x.split('-')[-1]for x in df['instrument']]
+        return df
+
+    def load_futures_instruments(self, market='', underlying='', mode='', style=''):
+        df = self.load_all_futures_markets_instrument_df()
+        df_tmp = df.copy()
+
+        if market != '':
+            df_tmp = df_tmp[df_tmp['market'] == market]
+        if underlying != '':
+            df_tmp = df_tmp[df_tmp['underlying'] == underlying]
+        if mode == 'PERP_ONLY':
+            df_tmp = df_tmp[df_tmp['tenor'] == 'PERPETUAL']
+        elif mode == 'FUTURE_ONLY':
+            df_tmp = df_tmp[df_tmp['tenor'] != 'PERPETUAL']
+        if style != '':
+            df_tmp = df_tmp[df_tmp['style'] == style]
+        return df_tmp
+
+    def load_all_spot_markets_instrument_df(self):
+        all_spots = self.load_all_spots_markets_instruments()
+        df = pd.DataFrame(all_spots, columns=['market', 'instrument'])
+        return df
+
+    def load_spot_instruments(self, market='', instrument=''):
+        df = self.load_all_spot_markets_instrument_df()
+        df_tmp = df.copy()
+
+        if market != '':
+            df_tmp = df_tmp[df_tmp['market'] == market]
+        if instrument != '':
+            df_tmp = df_tmp[df_tmp['instrument'] == instrument]
+        return df_tmp
+
     def load_annual_hourly_ohlc_data(self, mode, market, instrument):
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         path_to_cache = os.path.join(project_root, 'Data', 'ohlc_annual_hourly')
@@ -159,6 +198,7 @@ class cryptoCompareApi():
 
         data = pd.read_csv(file_path)
         data['TIMESTAMP'] = pd.to_datetime(data['TIMESTAMP'])
+        print(f'{path_to_cache} loaded {len(data)} rows')
         return data
 
 
