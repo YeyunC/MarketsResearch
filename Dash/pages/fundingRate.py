@@ -92,34 +92,44 @@ def plot_funding_rates(funding_instru):
 
 def plot_prices(spot_instru, future_instru, funding_instru):
     spot_v, spot_i = spot_instru.split('|')
-    future_v, future_i = future_instru.split('|')
-    funding_v, funding_i = funding_instru.split('|')
-
     df_spot = __dataAPI.load_annual_hourly_ohlc_data(mode='spot', instrument=spot_i, market=spot_v)
     df_spot = df_spot[['TIMESTAMP', 'CLOSE']].rename({'CLOSE': 'spot'}, axis=1).set_index('TIMESTAMP')
-    df_future = __dataAPI.load_annual_hourly_ohlc_data(mode='futures', instrument=future_i, market=future_v)
-    df_future = df_future[['TIMESTAMP', 'CLOSE']].rename({'CLOSE': 'future'}, axis=1).set_index('TIMESTAMP')
+    funding_v, funding_i = funding_instru.split('|')
     df_funding = __dataAPI.load_annual_hourly_ohlc_data(mode='fundingrate', instrument=funding_i, market=funding_v)
     df_funding = df_funding[['TIMESTAMP', 'CLOSE']].rename({'CLOSE': 'funding'}, axis=1).set_index('TIMESTAMP')
+    df = pd.concat([df_spot, df_funding], axis=1)
 
-    df = pd.concat([df_spot, df_future, df_funding], axis=1).sort_index().reset_index()
-    df['basis'] = df['future'] / df['spot'] - 1
-    df['spread'] = df['basis'] - df['funding']
+    future_list = __dataAPI.load_futures_instruments(market='binance', underlying='BTC-USDT')
+    for tmp_futures in future_list:
+        # future_v, future_i = tmp_futures.split('|')
+        df_future = __dataAPI.load_annual_hourly_ohlc_data(mode='futures', instrument=tmp_futures, market='binance')
+        df_future = df_future[['TIMESTAMP', 'CLOSE']].rename({'CLOSE': tmp_futures}, axis=1)
+        df_future = df_future.drop_duplicates(subset='TIMESTAMP', keep='last').set_index('TIMESTAMP')
+        df = pd.concat([df, df_future], axis=1)
+
+    df = df.sort_index().reset_index()
+
+    for tmp_futures in future_list:
+        df[tmp_futures] = df[tmp_futures] / df['spot'] - 1
+
     df['annual_funding'] = df['funding'] * 3 * 365
 
     quantiles = df.quantile([0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99])
-    quantiles['percentile'] = [f'{x:0.0%}' for x in quantiles.index]
+    quantiles['stats'] = [f'{x:0.0%} percentile' for x in quantiles.index]
+    stats = pd.DataFrame([df.mean(), df.std()], index=['mean', 'std dev'])
+    stats['stats'] = stats.index
+    quantiles = pd.concat([stats, quantiles])
     quantiles['annual_funding'] = [f'{x:.2%}' for x in quantiles['annual_funding']]
-    quantiles['basis_in_bps'] = [f'{x * 1e4:.2f}' for x in quantiles['basis']]
-    quantiles['spread_in_bps'] = [f'{x * 1e4:.2f}' for x in quantiles['spread']]
-    quantiles = quantiles[['percentile', 'annual_funding', 'basis_in_bps', 'spread_in_bps']]
+
+    for tmp_futures in future_list:
+        quantiles[tmp_futures] = [f'{x * 1e4:.2f}' for x in quantiles[tmp_futures]]
+
+    quantiles = quantiles[['stats', 'annual_funding'] + future_list]
     quantile_table = dash_table.DataTable(quantiles.to_dict('records'),
                                           [{"name": i, "id": i} for i in quantiles.columns])
 
     fig_price = go.Figure([
-        go.Scatter(x=df['TIMESTAMP'], y=df['spot'], name=spot_instru),
-        go.Scatter(x=df['TIMESTAMP'], y=df['future'], name=future_instru)
-    ])
+        go.Scatter(x=df['TIMESTAMP'], y=df['spot'], name=spot_instru)])
 
     fig_price.update_layout(
         title=f'Spot vs Futures/Perp over time',
@@ -127,9 +137,10 @@ def plot_prices(spot_instru, future_instru, funding_instru):
         yaxis_title='Price in $'
     )
     fig_funding = go.Figure([
-        go.Scatter(x=df['TIMESTAMP'], y=df['funding'] * 1e4, name='funding rates'),
-        go.Scatter(x=df['TIMESTAMP'], y=df['basis'] * 1e4, name='basis (future-spot)')
-    ])
+                                go.Scatter(x=df['TIMESTAMP'], y=df['funding'] * 1e4, name='funding rates')] + [
+                                go.Scatter(x=df['TIMESTAMP'], y=df[tmp_futures] * 1e4, name=f'basis for {tmp_futures}')
+                                for tmp_futures in future_list
+                            ])
 
     fig_funding.update_layout(
         title=f'Fundung Rate vs Future-Spot over time',
