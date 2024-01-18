@@ -8,6 +8,7 @@ from dash import dash_table
 from dash import dcc, html, callback, Output, Input
 from dash.exceptions import PreventUpdate
 
+from Analysis import funding_trades
 from DataAPI.cryptoCompare import cryptoCompareApi
 
 __app_id = 'funding_rate_'
@@ -27,14 +28,17 @@ def filter_instrument(x):
 
 
 def get_layout():
-    funding_instrument_list = __dataAPI.load_all_futures_markets_instruments()
-    funding_instrument_list = [x for x in funding_instrument_list if filter_instrument(x[1])]
+    all_future = __dataAPI.load_futures_instruments()
+    all_future_underlying = all_future['underlying'].unique()
 
-    target_funding_list = [x for x in funding_instrument_list if ('VANILLA-PERPETUAL' in x[1])]
-    target_futures_list = [x for x in funding_instrument_list if ('VANILLA' in x[1])]
-
-    spot_instrument_list = __dataAPI.load_all_spots_markets_instruments()
-    target_spots_list = [x for x in spot_instrument_list if filter_instrument(x[1])]
+    # funding_instrument_list = __dataAPI.load_all_futures_markets_instruments()
+    # funding_instrument_list = [x for x in funding_instrument_list if filter_instrument(x[1])]
+    #
+    # target_funding_list = [x for x in funding_instrument_list if ('VANILLA-PERPETUAL' in x[1])]
+    # target_futures_list = [x for x in funding_instrument_list if ('VANILLA' in x[1])]
+    #
+    # spot_instrument_list = __dataAPI.load_all_spots_markets_instruments()
+    # target_spots_list = [x for x in spot_instrument_list if filter_instrument(x[1])]
 
     layout = html.Div(id='parent', children=[
         html.H1(
@@ -43,28 +47,27 @@ def get_layout():
             style={'textAlign': 'center', 'marginTop': 40, 'marginBottom': 40}),
         dbc.Row([
             dbc.Col([
-                dcc.Markdown("Funding Rate Instrument"),
+                dcc.Markdown("Underlying"),
                 dcc.Dropdown(
-                    id=__app_id + 'funding_dropdown',
-                    value='binance|BTC-USDT-VANILLA-PERPETUAL',
-                    options=[{'label': '|'.join(x), 'value': '|'.join(x)} for x in target_funding_list]),
+                    id=__app_id + 'underlying_dropdown',
+                    value='BTC-USDT',
+                    options=[{'label': x, 'value': x} for x in all_future_underlying]),
             ]),
             dbc.Col([
-                dcc.Markdown("Futures Instrument"),
+                dcc.Markdown("Markets"),
                 dcc.Dropdown(
-                    id=__app_id + 'future_dropdown',
-                    value='binance|BTC-USDT-VANILLA-PERPETUAL',
-                    options=[{'label': '|'.join(x), 'value': '|'.join(x)} for x in target_futures_list])
+                    id=__app_id + 'market_dropdown')
+
             ]),
-            dbc.Col([
-                dcc.Markdown("Spot Instrument"),
-                dcc.Dropdown(
-                    id=__app_id + 'spot_dropdown',
-                    value='binanceusa|BTC-USDT',
-                    options=[{'label': '|'.join(x), 'value': '|'.join(x)} for x in target_spots_list])
-            ]),
+            # dbc.Col([
+            #     dcc.Markdown("Spot Instrument"),
+            #     dcc.Dropdown(
+            #         id=__app_id + 'spot_dropdown',
+            #         value='binanceusa|BTC-USDT',
+            #         options=[{'label': '|'.join(x), 'value': '|'.join(x)} for x in target_spots_list])
+            # ]),
         ]),
-        dcc.Graph(id=__app_id + 'funding_rate_chart'),
+        dcc.Graph(id=__app_id + 'basis_chart'),
         dbc.Col(id=__app_id + 'quantile_table', xs=4, sm=4, md=3, lg=3, xl=3, xxl=3),
         dcc.Graph(id=__app_id + 'distribution_chart'),
         dcc.Graph(id=__app_id + 'price_chart')
@@ -88,6 +91,21 @@ def plot_funding_rates(funding_instru):
         title=f'{market} {instrument} Fundung Rate over time',
         xaxis_title='Dates',
         yaxis_title='Funding Rate'
+    )
+    return fig
+
+
+def plot_basis(instrument, market):
+    df = funding_trades.get_all_future_basis(instrument, market)
+    data = []
+    for col in df.columns:
+        data.append(go.Scatter(x=df.index, y=df[col], name=col))
+    fig = go.Figure(data)
+    fig.update_layout(
+        title=f'{market} {instrument} basis over time',
+        xaxis_title='Dates',
+        yaxis_title='basis',
+        showlegend=True
     )
     return fig
 
@@ -178,16 +196,24 @@ def plot_prices(spot_instru, future_instru, funding_instru):
 
 
 @callback(
-    [Output(component_id=__app_id + 'price_chart', component_property='figure'),
-     Output(component_id=__app_id + 'funding_rate_chart', component_property='figure'),
-     Output(component_id=__app_id + 'distribution_chart', component_property='figure'),
-     Output(component_id=__app_id + 'quantile_table', component_property='children')],
-    [Input(component_id=__app_id + 'funding_dropdown', component_property='value'),
-     Input(component_id=__app_id + 'future_dropdown', component_property='value'),
-     Input(component_id=__app_id + 'spot_dropdown', component_property='value')])
-def graph_update(funding_dropdown, future_dropdown, spot_dropdown):
-    if funding_dropdown is None or future_dropdown is None or spot_dropdown is None:
+    Output(component_id=__app_id + 'market_dropdown', component_property='options'),
+    [Input(component_id=__app_id + 'underlying_dropdown', component_property='value')])
+def load_markets(underlying_dropdown):
+    if underlying_dropdown is None:
         raise PreventUpdate
 
-    fig_price, fig_funding, fig_spread, quantile_table = plot_prices(spot_dropdown, future_dropdown, funding_dropdown)
-    return fig_price, fig_funding, fig_spread, quantile_table
+    all_future = __dataAPI.load_futures_instruments(underlying=underlying_dropdown)
+    all_future_markets = all_future['market'].unique()
+    return [{'label': x, 'value': x} for x in all_future_markets]
+
+
+@callback(
+    Output(component_id=__app_id + 'basis_chart', component_property='figure'),
+    [Input(component_id=__app_id + 'underlying_dropdown', component_property='value'),
+     Input(component_id=__app_id + 'market_dropdown', component_property='value')])
+def basis_plot_update(underlying, market):
+    if underlying is None or market is None:
+        raise PreventUpdate
+
+    fig = plot_basis(instrument=underlying, market=market)
+    return fig
