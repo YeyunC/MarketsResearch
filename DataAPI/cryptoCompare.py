@@ -142,7 +142,7 @@ class cryptoCompareApi():
         df = pd.DataFrame(all_futures, columns=['market', 'instrument'])
         df['underlying'] = ['-'.join(x.split('-')[:2]) for x in df['instrument']]
         df['style'] = [x.split('-')[-2] for x in df['instrument']]
-        df['tenor'] = [x.split('-')[-1]for x in df['instrument']]
+        df['tenor'] = [x.split('-')[-1] for x in df['instrument']]
         return df
 
     def load_futures_instruments(self, market='', underlying='', mode='', style=''):
@@ -176,7 +176,7 @@ class cryptoCompareApi():
             df_tmp = df_tmp[df_tmp['instrument'] == instrument]
         return df_tmp
 
-    def load_annual_hourly_ohlc_data(self, mode, market, instrument):
+    def load_annual_hourly_ohlc_data(self, mode, market, instrument, start_year=2023, end_year=2024):
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         path_to_cache = os.path.join(project_root, 'Data', 'ohlc_annual_hourly')
 
@@ -185,30 +185,41 @@ class cryptoCompareApi():
             if not os.path.exists(path_to_cache):
                 os.mkdir(path_to_cache)
 
-        file_path = os.path.join(path_to_cache, '2014.csv')
-        if not os.path.exists(file_path):
-            data = self.load_date_range_data(
-                start_date=dt.datetime(2023, 1, 1),
-                end_date=dt.datetime(2024, 1, 1),
-                freq='hours',
-                load_func=self.load_historical_ohlcv,
-                mode=mode,
-                market=market,
-                instrument=instrument)
-            data = self.proc_historical_ohlcv(data)
-            if len(data) == 0:
-                pd.DataFrame({'EMPTY':[]}).to_csv(file_path, index_label=False)
-            else:
-                data.to_csv(file_path, index_label=False)
+        iyear = start_year
+        while iyear <= end_year:
+            file_path = os.path.join(path_to_cache, f'{iyear}.csv')
+            if not os.path.exists(file_path):
+                data = self.load_date_range_data(
+                    start_date=dt.datetime(iyear, 1, 1),
+                    end_date=min(dt.datetime(iyear + 1, 1, 1), dt.datetime.now()),
+                    freq='hours',
+                    load_func=self.load_historical_ohlcv,
+                    mode=mode,
+                    market=market,
+                    instrument=instrument)
+                data = self.proc_historical_ohlcv(data)
+                if len(data) == 0:
+                    pd.DataFrame({'EMPTY': []}).to_csv(file_path, index_label=False)
+                else:
+                    data.to_csv(file_path, index_label=False)
+            iyear = iyear + 1
 
-        data = pd.read_csv(file_path)
-        print(f'{path_to_cache} loaded {len(data)} rows')
-        if len(data) > 0:
-            data['TIMESTAMP'] = pd.to_datetime(data['TIMESTAMP'])
+        data_list = []
+        iyear = start_year
+        while iyear <= end_year:
+            file_path = os.path.join(path_to_cache, f'{iyear}.csv')
+            data = pd.read_csv(file_path)
+            if len(data) > 0:
+                data['TIMESTAMP'] = pd.to_datetime(data['TIMESTAMP'])
+                data_list.append(data)
+            iyear = iyear + 1
+
+        if len(data_list) > 0:
+            data = pd.concat(data_list)
+            print(f'{path_to_cache} loaded {len(data)} rows')
             return data
         else:
             return pd.DataFrame()
-
 
 
 if __name__ == '__main__':
