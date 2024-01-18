@@ -24,7 +24,7 @@ def get_all_funding_rates(instrument):
     data_list = []
     for idx, perp in all_perps.iterrows():
         data = __dataAPI.load_annual_hourly_ohlc_data(mode='fundingrate', instrument=perp['instrument'],
-                                                      market=perp['market'])
+                                                      market=perp['market'], end_year=2024)
         tmp_name = f"funding_{perp['market']}"
         data['CLOSE'] = data['CLOSE'] * 3 * 365
         data = data[['TIMESTAMP', 'CLOSE']].rename({'CLOSE': tmp_name}, axis=1)
@@ -47,36 +47,58 @@ def get_all_future_basis(instrument, market):
         print(f'spot market {market} does not exist, using binance instead')
         spot_market = 'binance'
 
-    df_spot = __dataAPI.load_annual_hourly_ohlc_data(mode='spot', instrument=instrument, market=spot_market)
-    df_spot = df_spot[['TIMESTAMP', 'CLOSE']].rename({'CLOSE': 'spot'}, axis=1)
-    df_spot = df_spot.drop_duplicates(subset='TIMESTAMP', keep='last').set_index('TIMESTAMP')
+    try:
+        df_spot = __dataAPI.load_annual_hourly_ohlc_data(
+            mode='spot', instrument=instrument, market=spot_market, start_year=2021)
+        df_spot = df_spot[['TIMESTAMP', 'CLOSE']].rename({'CLOSE': 'spot'}, axis=1)
+        df_spot = df_spot.drop_duplicates(subset='TIMESTAMP', keep='last').set_index('TIMESTAMP')
+    except:
+        print(market)
 
     data_list = [df_spot]
 
     all_futures = __dataAPI.load_futures_instruments(underlying=instrument, market=market, style='VANILLA')
     for idx, fut in all_futures.iterrows():
-        data = __dataAPI.load_annual_hourly_ohlc_data(mode='futures', instrument=fut['instrument'],
-                                                      market=fut['market'])
-        if len(data) > 0:
-            tmp_name = get_fut_col_name(fut)
-            data = data[['TIMESTAMP', 'CLOSE']].rename({'CLOSE': tmp_name}, axis=1)
-            data = data.drop_duplicates(subset='TIMESTAMP', keep='last').set_index('TIMESTAMP')
-            data_list.append(data)
+        try:
+            data = __dataAPI.load_annual_hourly_ohlc_data(
+                mode='futures', instrument=fut['instrument'], market=fut['market'], start_year=2021)
+
+            if len(data) > 0:
+                tmp_name = get_fut_col_name(fut)
+                data = data[['TIMESTAMP', 'CLOSE']].rename({'CLOSE': tmp_name}, axis=1)
+                data = data.drop_duplicates(subset='TIMESTAMP', keep='last').set_index('TIMESTAMP')
+                data_list.append(data)
+        except:
+            print(fut)
 
     df = pd.concat(data_list, axis=1).sort_index()
     for idx, fut in all_futures.iterrows():
-        tmp_name = get_fut_col_name(fut)
-        if tmp_name in df.columns:
-            df[tmp_name] = df[tmp_name] / df['spot'] - 1
+        try:
+            tmp_name = get_fut_col_name(fut)
+            if tmp_name in df.columns:
+                df[tmp_name] = df[tmp_name] / df['spot'] - 1
 
-            tenor = fut['tenor']
-            if tenor == 'PERPETUAL':
-                df[tmp_name] = df[tmp_name] * 3 * 365
-            else:
-                expiry = dt.datetime.strptime(tenor, '%Y%m%d')
-                today = dt.datetime.now()
-                annulized_factor = (expiry - today).days / 365
-                df[tmp_name] = df[tmp_name] / annulized_factor
+                tenor = fut['tenor']
+                if tenor == 'PERPETUAL':
+                    df[tmp_name] = df[tmp_name] * 3 * 365
+
+                    funding_rate = __dataAPI.load_annual_hourly_ohlc_data(
+                        mode='fundingrate', instrument=fut['instrument'], market=fut['market'], start_year=2021)
+                    funding_rate['CLOSE'] = funding_rate['CLOSE'] * 3 * 365
+                    funding_rate = funding_rate[['TIMESTAMP', 'CLOSE']].rename({'CLOSE': 'FUNDING'}, axis=1)
+                    funding_rate = funding_rate.drop_duplicates(subset='TIMESTAMP', keep='last').set_index('TIMESTAMP')
+
+                    df = pd.concat([df, funding_rate], axis=1)
+                    df[tmp_name] = df[tmp_name] - df['FUNDING']
+                    df.drop('FUNDING', axis=1, inplace=True)
+
+                else:
+                    expiry = dt.datetime.strptime(tenor, '%Y%m%d')
+                    today = dt.datetime.now()
+                    annulized_factor = (expiry - today).days / 365
+                    df[tmp_name] = df[tmp_name] / annulized_factor
+        except:
+            print(fut)
 
     df.drop('spot', axis=1, inplace=True)
     return df
@@ -93,9 +115,10 @@ def calc_stats(df):
 
 
 def calc_all_stats(instrument):
-    df_funding = get_all_funding_rates(instrument)
-
-    data_list = [df_funding]
+    # df_funding = get_all_funding_rates(instrument)
+    #
+    # data_list = [df_funding]
+    data_list = []
     all_future_markets = get_all_futures(instrument=instrument)['market'].unique()
     for mkt in all_future_markets:
         df_basis = get_all_future_basis(instrument, market=mkt)
@@ -114,7 +137,7 @@ if __name__ == '__main__':
 
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     path_to_cache = os.path.join(project_root, 'Data', 'funding_basis_stats')
-    file_path = os.path.join(path_to_cache, f'{instrument}.csv')
+    file_path = os.path.join(path_to_cache, f'{instrument}_3Y.csv')
 
     data = calc_all_stats(instrument='BTC-USDT')
     data.to_csv(file_path)
