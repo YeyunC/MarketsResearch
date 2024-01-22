@@ -31,15 +31,6 @@ def get_layout():
     all_future = __dataAPI.load_futures_instruments()
     all_future_underlying = all_future['underlying'].unique()
 
-    # funding_instrument_list = __dataAPI.load_all_futures_markets_instruments()
-    # funding_instrument_list = [x for x in funding_instrument_list if filter_instrument(x[1])]
-    #
-    # target_funding_list = [x for x in funding_instrument_list if ('VANILLA-PERPETUAL' in x[1])]
-    # target_futures_list = [x for x in funding_instrument_list if ('VANILLA' in x[1])]
-    #
-    # spot_instrument_list = __dataAPI.load_all_spots_markets_instruments()
-    # target_spots_list = [x for x in spot_instrument_list if filter_instrument(x[1])]
-
     layout = html.Div(id='parent', children=[
         html.H1(
             id='H1',
@@ -202,8 +193,10 @@ def load_markets(underlying_dropdown):
     if underlying_dropdown is None:
         raise PreventUpdate
 
-    all_future = __dataAPI.load_futures_instruments(underlying=underlying_dropdown)
+    all_future = __dataAPI.load_futures_instruments(underlying=underlying_dropdown, style='VANILLA')
     all_future_markets = all_future['market'].unique()
+    if underlying_dropdown == 'BTC-USDT':
+        all_future_markets = ['CME'] + list(all_future_markets)
     return [{'label': x, 'value': x} for x in all_future_markets]
 
 
