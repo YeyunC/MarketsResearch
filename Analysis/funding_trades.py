@@ -74,7 +74,6 @@ def get_all_future_basis(instrument, market):
     all_futures = __dataAPI.load_futures_instruments(underlying=instrument, market=market, style='VANILLA')
     for idx, fut in all_futures.iterrows():
         try:
-
             data = __dataAPI.load_annual_hourly_ohlc_data(
                 mode='futures', instrument=fut['instrument'], market=fut['market'], start_year=2023)
 
@@ -89,6 +88,7 @@ def get_all_future_basis(instrument, market):
                     mode='fundingrate', instrument=fut['instrument'], market=fut['market'], start_year=2023)
                 if len(funding_rate) > 0:
                     tmp_name = get_funding_col_name()
+                    funding_rate = funding_rate[funding_rate['CLOSE'] < 10000]
                     funding_rate = funding_rate[['TIMESTAMP', 'CLOSE']].rename({'CLOSE': tmp_name}, axis=1)
                     funding_rate = funding_rate.drop_duplicates(subset='TIMESTAMP', keep='last').set_index('TIMESTAMP')
                     data_list.append(funding_rate)
@@ -133,6 +133,7 @@ def get_all_future_basis(instrument, market):
         except:
             print(fut)
 
+    df = df[df['spot'] > 1]
     df.drop('spot', axis=1, inplace=True)
     return df
 
@@ -163,6 +164,10 @@ def plot_charts_look_back(df, lookback):
     df_calc = df[df.index >= filter_day].copy()
     for col in df.columns:
         plot_column(df_calc, col, instrument, lookback)
+        if 'PERP' in col:
+            market = col.split('|')[-1]
+            if market in ['binance', 'bitfinex', 'okex']:
+                plot_column_hist(df_calc, col, instrument, lookback)
 
 
 def calc_all_stats(instrument):
@@ -185,6 +190,7 @@ def calc_all_stats(instrument):
         rlt = calc_stats_to_df(df, lookback=x)
         rlt_list.append(rlt)
     df_rlt = pd.concat(rlt_list)
+    df_rlt = df_rlt.sort_index()
 
     df = annualize_df(df)
     for x in [90, 180, 365]:
@@ -231,6 +237,21 @@ def plot_column(df, col, instrument, lookback):
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     path_to_fig = os.path.join(project_root, 'Data', 'funding_basis_stats')
     file_path = os.path.join(path_to_fig, f'fig_{instrument}_{col}_{lookback}.png')
+
+    plt.savefig(file_path, format='PNG')
+
+
+def plot_column_hist(df, col, instrument, lookback):
+    plt.figure(figsize=(12, 4))
+    plt.hist(df[col], bins=50)
+    plt.axvline(x=0, color='green', linestyle='--')
+    plt.title(col)
+    plt.tight_layout()
+
+    # write image to bytes
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path_to_fig = os.path.join(project_root, 'Data', 'funding_basis_stats')
+    file_path = os.path.join(path_to_fig, f'hist_{instrument}_{col}_{lookback}.png')
 
     plt.savefig(file_path, format='PNG')
 
