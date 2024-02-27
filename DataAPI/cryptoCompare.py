@@ -112,7 +112,10 @@ class cryptoCompareApi():
             return
 
         url = f'https://data-api.cryptocompare.com/{mode}/v1/markets/instruments'
-        data = self.request_to_dict(url, {})
+        params = {}
+        if mode == 'futures':
+            params = {'instrument_status': 'ACTIVE,EXPIRED'}
+        data = self.request_to_dict(url, params)
         return data
 
     def load_all_futures_markets_instruments(self):
@@ -176,6 +179,59 @@ class cryptoCompareApi():
             df_tmp = df_tmp[df_tmp['instrument'] == instrument]
         return df_tmp
 
+    def load_all_futures_ohlc_data(self, market, underlying, iyear=2023):
+        year_start = pd.Timestamp(iyear, 1, 1)
+        year_end = min(pd.Timestamp(iyear + 1, 1, 1), pd.Timestamp.now())
+
+        data_list = []
+        metadata = dataAPI.load_all_meta_data('futures')
+        for key, val in metadata[market]['instruments'].items():
+            if underlying in key:
+                if not 'PERPETUAL' in key:
+                    try:
+                        if not 'FIRST_TRADE_FUTURES_TIMESTAMP' in val.keys():
+                            continue
+                        first_ts = pd.to_datetime(val['FIRST_TRADE_FUTURES_TIMESTAMP'], unit='s')
+                        last_ts = pd.to_datetime(val['LAST_TRADE_FUTURES_TIMESTAMP'], unit='s')
+                        if first_ts > year_end:
+                            continue
+                        if last_ts < year_start:
+                            continue
+
+                        start_ts = max(first_ts, year_start)
+                        end_ts = min(last_ts, year_end)
+
+                        expiry_ts = pd.to_datetime(val['CONTRACT_EXPIRATION_TS'], unit='s')
+
+                        data = self.load_date_range_data(
+                            start_date=start_ts,
+                            end_date=end_ts,
+                            freq='hours',
+                            load_func=self.load_historical_ohlcv,
+                            mode='futures',
+                            market=market,
+                            instrument=key)
+                        data = self.proc_historical_ohlcv(data)
+                        data['EXPIRY_TS'] = expiry_ts
+                        data['CONTRACT'] = key
+
+                        data_list.append(data)
+
+                    except:
+                        print(key)
+
+        rlt = pd.concat(data_list)
+        return rlt
+
+    def load_rolling_futures_ohlc_data(self, market, instrument, start_year=2023, end_year=2024):
+        data = self.load_annual_hourly_ohlc_data('allfutures', market, instrument, start_year, end_year)
+        data['EXPIRY_TS'] = pd.to_datetime(data['EXPIRY_TS'])
+        data = data[(data['EXPIRY_TS'] - data['TIMESTAMP']) > pd.Timedelta(days=2)]
+        data.sort_values(['TIMESTAMP', 'EXPIRY_TS'], inplace=True)
+        data.drop_duplicates(subset='TIMESTAMP', keep='last', inplace=True)
+        data = data[['TIMESTAMP', 'CLOSE', 'CONTRACT']].copy()
+        return data
+
     def load_annual_hourly_ohlc_data(self, mode, market, instrument, start_year=2023, end_year=2024):
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         path_to_cache = os.path.join(project_root, 'Data', 'ohlc_annual_hourly')
@@ -189,15 +245,21 @@ class cryptoCompareApi():
         while iyear <= end_year:
             file_path = os.path.join(path_to_cache, f'{iyear}.csv')
             if not os.path.exists(file_path):
-                data = self.load_date_range_data(
-                    start_date=dt.datetime(iyear, 1, 1),
-                    end_date=min(dt.datetime(iyear + 1, 1, 1), dt.datetime.now()),
-                    freq='hours',
-                    load_func=self.load_historical_ohlcv,
-                    mode=mode,
-                    market=market,
-                    instrument=instrument)
-                data = self.proc_historical_ohlcv(data)
+                if mode == 'allfutures':
+                    data = self.load_all_futures_ohlc_data(
+                        market=market,
+                        underlying=instrument,
+                        iyear=iyear)
+                else:
+                    data = self.load_date_range_data(
+                        start_date=dt.datetime(iyear, 1, 1),
+                        end_date=min(dt.datetime(iyear + 1, 1, 1), dt.datetime.now()),
+                        freq='hours',
+                        load_func=self.load_historical_ohlcv,
+                        mode=mode,
+                        market=market,
+                        instrument=instrument)
+                    data = self.proc_historical_ohlcv(data)
                 if len(data) == 0:
                     pd.DataFrame({'EMPTY': []}).to_csv(file_path, index_label=False)
                 else:
@@ -234,9 +296,11 @@ if __name__ == '__main__':
     #     instrument='XBTUSD')
     # data = dataAPI.proc_funding_rate_historical_ohlcv(data)
 
-    data = dataAPI.load_annual_hourly_ohlc_data(
-        mode='spot',
-        instrument='BTC-USDT',
-        market='bitstamp'
-    )
-    print(len(data))
+    data = dataAPI.load_rolling_futures_ohlc_data('binance', 'BTC-USDT')
+    print(data)
+    # data = dataAPI.load_annual_hourly_ohlc_data(
+    #     mode='spot',
+    #     instrument='BTC-USDT',
+    #     market='bitstamp'
+    # )
+    # print(len(data))
