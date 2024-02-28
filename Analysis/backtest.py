@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 import Analysis.funding_trades as fr
+import Analysis.risk_free_rate as rfr
 from DataAPI.cryptoCompare import cryptoCompareApi
 
 __dataAPI = cryptoCompareApi()
@@ -128,24 +129,40 @@ def plot_pnl(df, title, cols):
 
 
 def calc_stats(df):
-    n_days = (df.index.max() - df.index.min()).days
-    final_return = df.iloc[-1]['total_pnl']
-    annualized_return = final_return / n_days * 365
+    # n_days = (df.index.max() - df.index.min()).days
+    # final_return = df.iloc[-1]['total_pnl']
+    # annualized_return = final_return / n_days * 365
 
-    vol_of_return = np.std(df['total_pnl'].resample('1D').last().diff())
-    vol_of_return = vol_of_return * np.sqrt(365)
+    daily_return = pd.DataFrame(df['total_pnl'].resample('1D').last())
+    risk_free_return = rfr.read_risk_free_return()
+    daily_return = daily_return.join(risk_free_return)
+    daily_return['return_1'] = daily_return['total_pnl'].shift().fillna(0)
+    daily_return['daily_strategy_return'] = daily_return['total_pnl'] - daily_return['return_1']
+    daily_return['daily_excess_return'] = daily_return['daily_strategy_return'] - daily_return['daily_risk_free_return']
+
+    annualized_return = daily_return['daily_strategy_return'].mean() * 365
+    annualized_risk_free_return = daily_return['daily_risk_free_return'].mean() * 365
+
+    annualized_return_vol = daily_return['daily_strategy_return'].std() * np.sqrt(365)
+    annualized_excess_return_vol = daily_return['daily_excess_return'].std() * np.sqrt(365)
+
+    sharpe_ratio = (annualized_return - annualized_risk_free_return) / annualized_excess_return_vol
 
     start_price = df.iloc[0]['spot']
-    df['price_index'] = start_price * (1+df['total_pnl'])
+    df['price_index'] = start_price * (1 + df['total_pnl'])
     df['cummax'] = df['price_index'].cummax()
     df['drawdown'] = df['price_index'] / df['cummax'] - 1
     max_draw_down = df['drawdown'].min()
     df['drawdown'].plot()
     plt.show()
+
     return {
         'Annualized Return': annualized_return,
+        'Annualized Risk Free Return': annualized_risk_free_return,
         'Max Draw Down': max_draw_down,
-        'Vol of Return': vol_of_return,
+        'Vol of Return': annualized_return_vol,
+        'Vol of Excess Return': annualized_excess_return_vol,
+        'Sharpe Ratio': sharpe_ratio,
     }
 
 
