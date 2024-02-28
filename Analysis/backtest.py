@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
+import numpy as np
 import pandas as pd
 
 import Analysis.funding_trades as fr
@@ -8,15 +9,8 @@ from DataAPI.cryptoCompare import cryptoCompareApi
 __dataAPI = cryptoCompareApi()
 
 
-def get_all_future_basis(instrument, market):
-    def get_fut_col_name(fut):
-        return f"basis_{fut['tenor']}|{fut['market']}"
-
-    def get_funding_col_name():
-        return f"funding_{fut['tenor']}|{fut['market']}"
-
+def get_perp_basis_pnl(instrument, market):
     spot_markets = list(fr.get_all_spots(instrument)['market'])
-
     spot_market = market
     if not market in spot_markets:
         spot_market = 'coinbase'
@@ -30,71 +24,89 @@ def get_all_future_basis(instrument, market):
     except:
         print(market)
 
-    data_list = [df_spot]
+    perp = f'{instrument}-VANILLA-PERPETUAL'
 
-    all_futures = __dataAPI.load_futures_instruments(underlying=instrument, market=market, style='VANILLA')
-    for idx, fut in all_futures.iterrows():
-        try:
-            data = __dataAPI.load_annual_hourly_ohlc_data(
-                mode='futures', instrument=fut['instrument'], market=fut['market'], start_year=2023)
+    perp_data = __dataAPI.load_annual_hourly_ohlc_data(
+        mode='futures', instrument=perp, market=market, start_year=2023)
+    perp_data = perp_data[['TIMESTAMP', 'CLOSE']].rename({'CLOSE': 'PERP'}, axis=1)
+    perp_data = perp_data.drop_duplicates(subset='TIMESTAMP', keep='last').set_index('TIMESTAMP')
 
-            if len(data) > 0:
-                tmp_name = get_fut_col_name(fut)
-                data = data[['TIMESTAMP', 'CLOSE']].rename({'CLOSE': tmp_name}, axis=1)
-                data = data.drop_duplicates(subset='TIMESTAMP', keep='last').set_index('TIMESTAMP')
-                data_list.append(data)
+    funding_rate = __dataAPI.load_annual_hourly_ohlc_data(
+        mode='fundingrate', instrument=perp, market=market, start_year=2023)
 
-            if 'PERP' in fut['instrument']:
-                funding_rate = __dataAPI.load_annual_hourly_ohlc_data(
-                    mode='fundingrate', instrument=fut['instrument'], market=fut['market'], start_year=2023)
-                if len(funding_rate) > 0:
-                    tmp_name = get_funding_col_name()
-                    funding_rate = funding_rate[funding_rate['CLOSE'] < 10000]
-                    funding_rate = funding_rate[['TIMESTAMP', 'CLOSE']].rename({'CLOSE': tmp_name}, axis=1)
-                    funding_rate = funding_rate.drop_duplicates(subset='TIMESTAMP', keep='last').set_index('TIMESTAMP')
-                    data_list.append(funding_rate)
+    if len(funding_rate) > 0:
+        funding_rate = funding_rate[funding_rate['CLOSE'] < 10000]
+        funding_rate = funding_rate[['TIMESTAMP', 'CLOSE']].rename({'CLOSE': 'FUNDING'}, axis=1)
+        funding_rate = funding_rate.drop_duplicates(subset='TIMESTAMP', keep='last').set_index('TIMESTAMP')
 
-        except:
-            print(fut)
-
-    df = pd.concat(data_list, axis=1).sort_index()
+    df = pd.concat([df_spot, perp_data, funding_rate], axis=1).sort_index()
     df = df[df['spot'] > 1]
 
-    pnl_series = {}
-    for idx, fut in all_futures.iterrows():
-        try:
-            tmp_name = get_fut_col_name(fut)
-            if tmp_name in df.columns:
-                if ('basis_' in tmp_name) and ('PERP' in tmp_name):
-                    funding_column = tmp_name.replace('basis', 'funding')
-                    df_tmp = df[['spot', tmp_name, funding_column]]
-                    index_series = df_tmp['spot'] - df[tmp_name]
-                    start_price = df_tmp['spot'].dropna()[0]
-                    start_index = index_series.dropna()[0]
-                    index_pnl = (index_series - start_index) / start_price
-                    df_tmp[tmp_name.replace('basis_', 'pnl_market')] = index_pnl
+    index_series = df['spot'] - df['PERP']
+    start_price = df['spot'].dropna()[0]
+    start_index = index_series.dropna()[0]
+    df['position_pnl'] = (index_series - start_index) / start_price
 
-                    funding_pnl = df_tmp[funding_column] * df_tmp['spot'] / 8
-                    funding_pnl = funding_pnl.shift(1).fillna(0)
-                    funding_pnl = funding_pnl.cumsum() / start_price
-                    df_tmp[tmp_name.replace('basis_', 'pnl_funding_')] = funding_pnl
-                    df_tmp[tmp_name.replace('basis_', 'pnl_total_')] = funding_pnl + index_pnl
-                    pnl_series[tmp_name.replace('basis_', '')] = df_tmp
-                else:
-                    df_tmp = df[['spot', tmp_name]].dropna()
-                    index_series = df['spot'] - df[tmp_name]
-                    start_price = df['spot'].dropna()[0]
-                    start_index = index_series.dropna()[0]
-                    index_pnl = (index_series - start_index) / start_price
-                    df_tmp[tmp_name.replace('basis_', 'pnl_total_')] = index_pnl
-                    pnl_series[tmp_name.replace('basis_', '')] = df_tmp
-        except:
-            print(fut)
+    funding_pnl = df['FUNDING'] * df['spot'] / 8
+    funding_pnl = funding_pnl.shift(1).fillna(0)
+    df['funding_pnl'] = funding_pnl.cumsum() / start_price
+    df['total_pnl'] = df['position_pnl'] + df['funding_pnl']
 
-    return pnl_series
+    df.to_csv('PNL_LongSpotShortPerp.csv')
+    return df
 
 
-def plot_pnl(df, title):
+def get_term_future_basis_pnl(instrument, market):
+    spot_markets = list(fr.get_all_spots(instrument)['market'])
+    spot_market = market
+    if not market in spot_markets:
+        spot_market = 'coinbase'
+        print(f'spot market {market} does not exist, using {spot_market} instead')
+
+    try:
+        df_spot = __dataAPI.load_annual_hourly_ohlc_data(
+            mode='spot', instrument=instrument, market=spot_market, start_year=2023)
+        df_spot = df_spot[['TIMESTAMP', 'CLOSE']].rename({'CLOSE': 'spot'}, axis=1)
+        df_spot = df_spot.drop_duplicates(subset='TIMESTAMP', keep='last').set_index('TIMESTAMP')
+    except:
+        print(market)
+
+    rolling_futures = __dataAPI.load_rolling_futures_ohlc_data(
+        instrument=instrument, market=spot_market, start_year=2023)
+
+    near_futures = rolling_futures.sort_values('EXPIRY_TS').drop_duplicates(subset='TIMESTAMP',
+                                                                            keep='first').sort_values('TIMESTAMP')
+    far_futures = rolling_futures.sort_values('EXPIRY_TS').drop_duplicates(subset='TIMESTAMP', keep='last').sort_values(
+        'TIMESTAMP')
+
+    futures = pd.merge_asof(near_futures, far_futures, on='TIMESTAMP', suffixes=('_near', '_far'))
+    futures['roll'] = (futures['EXPIRY_TS_near'] == (futures['TIMESTAMP'] + pd.Timedelta(days=2)))
+    futures['use_far'] = (futures['EXPIRY_TS_near'] <= (futures['TIMESTAMP'] + pd.Timedelta(days=2)))
+
+    futures.loc[futures['use_far'], 'index'] = futures['CLOSE_far']
+    futures.loc[~futures['use_far'], 'index'] = futures['CLOSE_near']
+    futures = futures.set_index('TIMESTAMP')
+
+    df = pd.concat([df_spot, futures], axis=1).sort_index()
+    df = df[df['spot'] > 1]
+
+    index_series = df['spot'] - df['index']
+    start_price = df['spot'].dropna()[0]
+    start_index = index_series.dropna()[0]
+    df['unrealized_pnl'] = index_series - start_index
+    df['roll'] = df['roll'].fillna(False)
+    df.loc[df['roll'], 'realized_pnl'] = df['CLOSE_far'] - df['CLOSE_near']
+    df['realized_pnl'] = df['realized_pnl'].fillna(0).cumsum()
+    df['total_pnl'] = df['unrealized_pnl'] + df['realized_pnl']
+    df['total_pnl'] = df['total_pnl'] / start_price
+    df['unrealized_pnl'] = df['unrealized_pnl'] / start_price
+    df['realized_pnl'] = df['realized_pnl'] / start_price
+
+    df.to_csv('PNL_LongSpotShortFuture.csv')
+    return df
+
+
+def plot_pnl(df, title, cols):
     fig, ax = plt.subplots(figsize=(12, 6))
 
     # ax.yaxis.set_major_formatter(FormatStrFormatter('.2%'))
@@ -102,24 +114,57 @@ def plot_pnl(df, title):
     yticks = mtick.FormatStrFormatter(fmt)
     ax.yaxis.set_major_formatter(yticks)
 
-    for i in df.columns:
-        if 'pnl' in i:
-            if 'total' in i:
-                label = 'Total PnL'
-            elif 'funding' in i:
-                label = 'Funding PnL'
-            else:
-                label = 'Position PnL'
-            ax.plot(df.index, df[i] * 100, label=label)
+    # for i in ['total_pnl', 'unrealized_pnl', 'realized_pnl']:
+    for i in cols:
+        ax.plot(df.index, df[i] * 100, label=i)
+
+    ax.axhline(0, color='black', linestyle='--')
 
     plt.title(title)
     plt.legend()
     plt.ylabel('Cummulative PnL in %')
+    plt.tight_layout()
     plt.show()
 
 
+def calc_stats(df):
+    n_days = (df.index.max() - df.index.min()).days
+    final_return = df.iloc[-1]['total_pnl']
+    annualized_return = final_return / n_days * 365
+
+    vol_of_return = np.std(df['total_pnl'].resample('1D').last().diff())
+    vol_of_return = vol_of_return * np.sqrt(365)
+
+    start_price = df.iloc[0]['spot']
+    df['price_index'] = start_price * (1+df['total_pnl'])
+    df['cummax'] = df['price_index'].cummax()
+    df['drawdown'] = df['price_index'] / df['cummax'] - 1
+    max_draw_down = df['drawdown'].min()
+    df['drawdown'].plot()
+    plt.show()
+    return {
+        'Annualized Return': annualized_return,
+        'Max Draw Down': max_draw_down,
+        'Vol of Return': vol_of_return,
+    }
+
+
 if __name__ == '__main__':
-    df_list = get_all_future_basis('BTC-USDT', 'binance')
-    # plot_pnl(df_list['PERPETUAL|binance'], 'Long Binance BTC-USDT Spot, Short Binance BTC-USDT Perpetual')
-    # plot_pnl(df_list['20240329|binance'], 'Long Binance BTC-USDT Spot, Short Binance 3M Future')
-    plot_pnl(df_list['20240628|binance'], 'Long Binance BTC-USDT Spot, Short Binance 6M Future')
+    df_perp = get_perp_basis_pnl('BTC-USDT', 'binance')
+    # plot_pnl(
+    #     df_perp,
+    #     'Binance BTC-USDT | Long Spot, Short Perpetual',
+    #     ['position_pnl', 'funding_pnl', 'total_pnl']
+    # )
+    print('perp')
+    print(calc_stats(df_perp))
+
+    df_term_future = get_term_future_basis_pnl('BTC-USDT', 'binance')
+    plot_pnl(
+        df_term_future,
+        'Binance BTC-USDT | Long Spot, Short Front Month Futures Rolling Every 3M',
+        ['unrealized_pnl', 'realized_pnl', 'total_pnl']
+    )
+
+    print('term future')
+    print(calc_stats(df_term_future))
