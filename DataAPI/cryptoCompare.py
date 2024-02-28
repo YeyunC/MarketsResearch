@@ -226,10 +226,10 @@ class cryptoCompareApi():
     def load_rolling_futures_ohlc_data(self, market, instrument, start_year=2023, end_year=2024):
         data = self.load_annual_hourly_ohlc_data('allfutures', market, instrument, start_year, end_year)
         data['EXPIRY_TS'] = pd.to_datetime(data['EXPIRY_TS'])
-        data = data[(data['EXPIRY_TS'] - data['TIMESTAMP']) > pd.Timedelta(days=2)]
+        # data = data[(data['EXPIRY_TS'] - data['TIMESTAMP']) > pd.Timedelta(days=2)]
         data.sort_values(['TIMESTAMP', 'EXPIRY_TS'], inplace=True)
-        data.drop_duplicates(subset='TIMESTAMP', keep='last', inplace=True)
-        data = data[['TIMESTAMP', 'CLOSE', 'CONTRACT']].copy()
+        # data.drop_duplicates(subset='TIMESTAMP', keep='last', inplace=True)
+        data = data[['TIMESTAMP', 'CLOSE', 'CONTRACT', 'EXPIRY_TS']].copy()
         return data
 
     def load_annual_hourly_ohlc_data(self, mode, market, instrument, start_year=2023, end_year=2024):
