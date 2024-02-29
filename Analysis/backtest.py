@@ -81,8 +81,8 @@ def get_term_future_basis_pnl(instrument, market):
         'TIMESTAMP')
 
     futures = pd.merge_asof(near_futures, far_futures, on='TIMESTAMP', suffixes=('_near', '_far'))
-    futures['roll'] = (futures['EXPIRY_TS_near'] == (futures['TIMESTAMP'] + pd.Timedelta(days=2)))
-    futures['use_far'] = (futures['EXPIRY_TS_near'] <= (futures['TIMESTAMP'] + pd.Timedelta(days=2)))
+    futures['roll'] = (futures['EXPIRY_TS_near'] == (futures['TIMESTAMP'] + pd.Timedelta(hours=8)))
+    futures['use_far'] = (futures['EXPIRY_TS_near'] <= (futures['TIMESTAMP'] + pd.Timedelta(hours=8)))
 
     futures.loc[futures['use_far'], 'index'] = futures['CLOSE_far']
     futures.loc[~futures['use_far'], 'index'] = futures['CLOSE_near']
@@ -138,6 +138,9 @@ def calc_stats(df):
     daily_return = daily_return.join(risk_free_return)
     daily_return['return_1'] = daily_return['total_pnl'].shift().fillna(0)
     daily_return['daily_strategy_return'] = daily_return['total_pnl'] - daily_return['return_1']
+
+    # risk free rates fault back to 0
+    daily_return['daily_risk_free_return'] = 0
     daily_return['daily_excess_return'] = daily_return['daily_strategy_return'] - daily_return['daily_risk_free_return']
 
     annualized_return = daily_return['daily_strategy_return'].mean() * 365
@@ -177,10 +180,12 @@ if __name__ == '__main__':
     print(calc_stats(df_perp))
 
     df_term_future = get_term_future_basis_pnl('BTC-USDT', 'binance')
+    # df_term_future = df_term_future[df_term_future.index < pd.Timestamp(2023, 12, 29)]
     plot_pnl(
         df_term_future,
         'Binance BTC-USDT | Long Spot, Short Front Month Futures Rolling Every 3M',
-        ['unrealized_pnl', 'realized_pnl', 'total_pnl']
+        # ['unrealized_pnl', 'realized_pnl', 'total_pnl']
+        ['total_pnl']
     )
 
     print('term future')
